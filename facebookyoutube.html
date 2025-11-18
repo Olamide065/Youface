@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Hybrid YouTube + Facebook Multi Sync Player</title>
+
+<style>
+/* ===== Modern Multi-Video Player UI ===== */
+:root{
+  --accent1: #6e8dff;
+  --accent2: #4e6bdb;
+  --card-bg: #ffffff;
+  --muted: #6b7280;
+}
+
+*{box-sizing:border-box}
+body {
+  margin: 0;
+  padding: 24px;
+  font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+  background: linear-gradient(135deg,#f0f4ff,#ffffff);
+  color: #0f172a;
+}
+
+/* Page header & top controls */
+.header {
+  display:flex;
+  gap:12px;
+  align-items:center;
+  margin-bottom:18px;
+}
+.header h1{font-size:20px;margin:0;font-weight:600}
+.global-controls { margin-left:auto; display:flex; gap:10px; }
+
+.btn {
+  padding:10px 14px;
+  border-radius:12px;
+  border:none;
+  cursor:pointer;
+  font-weight:600;
+  background:linear-gradient(135deg,var(--accent1),var(--accent2));
+  color:white;
+  box-shadow:0 6px 18px rgba(80,100,200,0.14);
+}
+.btn.ghost {
+  background:transparent;
+  border:1px solid #e6e9f2;
+  color:var(--muted);
+  box-shadow:none;
+}
+
+/* Sections */
+.section {
+  background:var(--card-bg);
+  border-radius:14px;
+  padding:14px;
+  box-shadow:0 8px 28px rgba(70,90,150,0.06);
+  margin-bottom:20px;
+  border:1px solid #e9eefb;
+}
+
+.section-title { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+.controls-row { display:flex; gap:10px; align-items:center; }
+
+/* inputs */
+.input {
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid #e0e6f5;
+  width:100%;
+  background:#fbfdff;
+}
+
+/* Grid of cards */
+.grid {
+  display:grid;
+  grid-template-columns: repeat(auto-fit,minmax(320px,1fr));
+  gap:16px;
+  margin-top:12px;
+}
+
+/* Card */
+.card {
+  border-radius:14px;
+  padding:12px;
+  background:var(--card-bg);
+  border:1px solid #eef4ff;
+  box-shadow:0 6px 18px rgba(80,100,180,0.04);
+  transition:transform .18s, box-shadow .18s;
+}
+.card:hover{ transform: translateY(-4px); box-shadow:0 12px 30px rgba(80,100,180,0.08); }
+.card.synced { box-shadow: 0 0 20px rgba(110,141,255,0.18); border-color:#dbe8ff; }
+
+/* Frame */
+.frame { border-radius:10px; overflow:hidden; background:#000; width:100%; height:0; padding-bottom:56.25%; position:relative; }
+.frame > * { position:absolute; top:0; left:0; width:100%; height:100%; }
+
+/* card header small text */
+.small { font-size:12px; color:var(--muted); }
+
+/* controls inside card */
+.card .controls { display:flex; gap:8px; margin-top:10px; align-items:center; }
+.card .controls button{ padding:8px 10px; border-radius:9px; border:1px solid #e7ecff; background:#f7f9ff; cursor:pointer; font-weight:600; }
+.card .controls button:hover{ transform:translateY(-2px); }
+.card .controls input[type="range"]{ flex:1; accent-color:var(--accent1); }
+
+/* status */
+.status { margin-top:8px; font-size:12px; padding:6px 8px; display:inline-block; border-radius:8px; background:#f1f6ff; color:#334155; }
+
+/* mobile tweaks */
+@media (max-width:520px){
+  .header { flex-direction:column; align-items:stretch; gap:10px; }
+  .global-controls { margin-left:0; justify-content:flex-end; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Hybrid YouTube + Facebook Multi Sync Player</h1>
+
+  <div class="global-controls">
+    <button id="globalPlay" class="btn">Play All (Sync)</button>
+    <button id="globalPause" class="btn ghost">Pause All</button>
+  </div>
+</div>
+
+<!-- YOUTUBE SECTION -->
+<div class="section" id="ytSection">
+  <div class="section-title">
+    <strong>YouTube</strong>
+    <span class="small">Add YouTube video URLs (https://youtu.be/ID or youtube.com/watch?v=...)</span>
+  </div>
+
+  <div class="controls-row">
+    <input id="ytUrl" class="input" placeholder="Paste YouTube URL here..." />
+    <button id="addYt" class="btn">Add YouTube</button>
+    <button id="ytPlayAll" class="btn ghost">YT Play All</button>
+    <button id="ytPauseAll" class="btn ghost">YT Pause All</button>
+  </div>
+
+  <div id="ytGrid" class="grid"></div>
+</div>
+
+<!-- FACEBOOK SECTION -->
+<div class="section" id="fbSection">
+  <div class="section-title">
+    <strong>Facebook</strong>
+    <span class="small">Add Facebook video or reel URLs (public)</span>
+  </div>
+
+  <div class="controls-row">
+    <input id="fbUrl" class="input" placeholder="Paste Facebook video or reel URL here..." />
+    <button id="addFb" class="btn">Add Facebook</button>
+    <button id="fbPlayAll" class="btn ghost">FB Play All</button>
+    <button id="fbPauseAll" class="btn ghost">FB Pause All</button>
+  </div>
+
+  <div id="fbGrid" class="grid"></div>
+</div>
+
+<!-- Facebook SDK root -->
+<div id="fb-root"></div>
+
+<!-- ---------------- SCRIPTS: Load APIs ---------------- -->
+
+<!-- YouTube IFrame API (async) -->
+<script>
+  // Promise to know when YT API is ready
+  window.YT_API_READY = new Promise((resolve) => {
+    let tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+    // global function called by YouTube script
+    window.onYouTubeIframeAPIReady = function() { resolve(window.YT); };
+  });
+</script>
+
+<!-- Facebook SDK (async) -->
+<script>
+  window.fbLoaded = new Promise((resolve) => {
+    window.fbAsyncInit = function() {
+      FB.init({ xfbml: true, version: 'v17.0' });
+      resolve(FB);
+    };
+    (function(d, s, id){
+      var js, fjs = d.getElementsByTagName(s)[0];
+      if (d.getElementById(id)) return;
+      js = d.createElement(s); js.id = id; js.src = "https://connect.facebook.net/en_US/sdk.js";
+      js.async = true; js.defer = true;
+      fjs.parentNode.insertBefore(js, fjs);
+    }(document, 'script', 'facebook-jssdk'));
+  });
+</script>
+
+<!-- Main app: unified players + sync -->
+<script>
+/* ========== Global player registry ========== 
+   Each entry: { id, type: 'yt'|'fb', inst, card }
+*/
+const allPlayers = [];
+
+/* ----- Utility helpers ----- */
+function makeId(prefix='p') { return prefix + '-' + Math.random().toString(36).slice(2,9); }
+function el(query, parent=document) { return parent.querySelector(query); }
+function els(query, parent=document) { return Array.from(parent.querySelectorAll(query)); }
+function isYouTubeUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be');
+  } catch(e){ return false; }
+}
+function extractYouTubeId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1);
+    if (u.searchParams.get('v')) return u.searchParams.get('v');
+    // fallback: maybe /embed/ID
+    const parts = u.pathname.split('/');
+    return parts.pop() || parts.pop();
+  } catch(e){ return null; }
+}
+function isFacebookUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.hostname.includes('facebook.com') || u.hostname.includes('fb.watch') || u.hostname.includes('fbcdn.net');
+  } catch(e){ return false; }
+}
+
+/* ------- YOUTUBE: add player card ------- */
+const ytGrid = document.getElementById('ytGrid');
+document.getElementById('addYt').addEventListener('click', async () => {
+  const url = document.getElementById('ytUrl').value.trim();
+  if (!url) return alert('Paste a YouTube URL first.');
+  if (!isYouTubeUrl(url)) {
+    if (!confirm('That does not look like a YouTube URL. Try anyway?')) return;
+  }
+  const id = extractYouTubeId(url);
+  if (!id) return alert('Could not extract YouTube ID.');
+  await createYouTubeCard(id, url);
+  document.getElementById('ytUrl').value = '';
+});
+
+async function createYouTubeCard(videoId, srcUrl) {
+  await window.YT_API_READY;
+  const cardId = makeId('ytcard');
+  const frameId = makeId('ytframe');
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div><strong>YouTube</strong> <span class="small"> ${escapeHtml(srcUrl)}</span></div>
+    <div class="frame" style="margin-top:10px;">
+      <div id="${frameId}"></div>
+    </div>
+    <div class="controls">
+      <button class="play">▶</button>
+      <button class="pause">❚❚</button>
+      <button class="mute">🔇</button>
+      <button class="unmute">🔊</button>
+      <input class="seek" type="range" min="0" max="100" value="0">
+      <button class="remove" style="background:#ffdada">✕</button>
+    </div>
+    <div class="status">loading...</div>
+  `;
+  ytGrid.prepend(card);
+
+  // create YT player
+  const player = new YT.Player(frameId, {
+    height: '100%',
+    width: '100%',
+    videoId: videoId,
+    playerVars: { rel:0, modestbranding:1 },
+    events: {
+      onReady: (e) => {
+        const entry = { id: cardId, type:'yt', inst: e.target, card };
+        allPlayers.push(entry);
+        setupCardControls(card, entry);
+      }
+    }
+  });
+
+  // keep adaptive height: YT iframe won't auto-fill due to wrapper; set iframe to absolute
+  // set the iframe container to 16:9 handled via CSS frame.
+}
+
+/* ------- FACEBOOK: add player card ------- */
+const fbGrid = document.getElementById('fbGrid');
+document.getElementById('addFb').addEventListener('click', async () => {
+  const url = document.getElementById('fbUrl').value.trim();
+  if (!url) return alert('Paste a Facebook URL first.');
+  // no hard validation; fb sdk will fail if invalid/private
+  await window.fbLoaded;
+  await createFacebookCard(url);
+  document.getElementById('fbUrl').value = '';
+});
+
+async function createFacebookCard(fbUrl) {
+  const cardId = makeId('fbcard');
+  const wrapperId = makeId('fbwrap');
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div><strong>Facebook</strong> <span class="small">${escapeHtml(fbUrl)}</span></div>
+    <div class="frame" style="margin-top:10px;">
+      <div id="${wrapperId}">
+        <div class="fb-video" data-href="${fbUrl}" data-width="500" data-allowfullscreen="true"></div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="play">▶</button>
+      <button class="pause">❚❚</button>
+      <button class="mute">🔇</button>
+      <button class="unmute">🔊</button>
+      <input class="seek" type="range" min="0" max="100" value="0">
+      <button class="remove" style="background:#ffdada">✕</button>
+    </div>
+    <div class="status">loading...</div>
+  `;
+  fbGrid.prepend(card);
+
+  // parse only this wrapper to render the FB XFBML
+  FB.XFBML.parse(document.getElementById(wrapperId));
+
+  // FB player instance arrives via FB.Event.subscribe('xfbml.ready')
+  // we listen globally (below) and attach when we detect the created .fb-video inside this card.
+  // setup controls now; the instance may be attached later.
+  const entry = { id: cardId, type:'fb', inst: null, card, fbWrapperId: wrapperId };
+  allPlayers.push(entry);
+  setupCardControls(card, entry);
+
+  // when FB creates instance it will be picked up by the global subscriber (see below)
+}
+
+/* ------- Attach FB instance when ready ------- */
+/* FB SDK emits xfbml.ready with msg.instance for video. We'll match it to card by checking the DOM element parent. */
+window.fbAsyncInit && FB && console.log; // (noop to satisfy linter)
+(function attachFbSubscriber(){
+  // Wait until fbLoaded resolved
+  window.fbLoaded.then((FBobj) => {
+    FBobj.Event.subscribe('xfbml.ready', (msg) => {
+      if (msg.type === 'video') {
+        const el = msg.target; // DOM element of the fb-video
+        // find nearest card containing this element
+        let parentCard = el.closest ? el.closest('.card') : null;
+        if (!parentCard) {
+          // fallback: search among cards for element with wrapper id
+          const wrappers = els('.card .fb-video');
+          parentCard = wrappers.map(w=>w.closest('.card')).find(c => c && c.contains(el));
+        }
+        if (parentCard) {
+          // find the registry entry for this card
+          const entry = allPlayers.find(a => a.card === parentCard && a.type === 'fb');
+          if (entry) {
+            entry.inst = msg.instance; // attach FB player instance
+            // mark ready on the UI
+            const st = parentCard.querySelector('.status');
+            if (st) st.textContent = 'ready';
+          } else {
+            // if no matching entry, push a new one
+            allPlayers.push({ id: makeId('fb'), type:'fb', inst: msg.instance, card: parentCard });
+          }
+        }
+      }
+    });
+  }).catch((e)=>{ /* ignore */ });
+})();
+
+/* ------- setup per-card UI controls (common for both types) ------- */
+function setupCardControls(card, registryEntry) {
+  const playBtn = card.querySelector('.play');
+  const pauseBtn = card.querySelector('.pause');
+  const muteBtn = card.querySelector('.mute');
+  const unmuteBtn = card.querySelector('.unmute');
+  const removeBtn = card.querySelector('.remove');
+  const seek = card.querySelector('.seek');
+  const status = card.querySelector('.status');
+
+  // helper to get player instance (for fb the inst might be attached later)
+  function getInst() { return registryEntry.inst; }
+
+  // attach actions (guarded)
+  playBtn.onclick = () => { const i=getInst(); if (i?.playVideo) i.playVideo(); else if (i?.play) i.play(); };
+  pauseBtn.onclick = () => { const i=getInst(); if (i?.pauseVideo) i.pauseVideo(); else if (i?.pause) i.pause(); };
+  muteBtn.onclick = () => { const i=getInst(); if (i?.mute) i.mute(); else if (i?.muteVideo) i.muteVideo?.(); };
+  unmuteBtn.onclick = () => { const i=getInst(); if (i?.unmute) i.unmute(); else if (i?.unMute) i.unMute?.(); };
+
+  removeBtn.onclick = () => {
+    // remove from DOM and registry
+    card.remove();
+    const idx = allPlayers.indexOf(registryEntry);
+    if (idx !== -1) allPlayers.splice(idx,1);
+  };
+
+  // seek change - both APIs:
+  seek.onchange = () => {
+    const val = Number(seek.value);
+    const inst = getInst();
+    if (!inst) return;
+    if (registryEntry.type === 'yt' && inst.seekTo) {
+      inst.seekTo(val, true);
+    } else if (registryEntry.type === 'fb' && inst.seek) {
+      inst.seek(val);
+    }
+  };
+
+  // periodically update seek & status if player is ready
+  const ticker = setInterval(() => {
+    const inst = getInst();
+    if (!inst) return;
+    if (registryEntry.type === 'yt') {
+      // YT Player API: getDuration/getCurrentTime are synchronous
+      try {
+        const dur = inst.getDuration?.() || 0;
+        const pos = inst.getCurrentTime?.() || 0;
+        if (dur > 0) seek.max = Math.floor(dur);
+        seek.value = Math.floor(pos);
+        status.textContent = 'ready';
+      } catch(e){}
+    } else if (registryEntry.type === 'fb') {
+      // FB uses callbacks
+      try {
+        inst.getDuration?.(d => { if (d) seek.max = Math.floor(d); });
+        inst.getCurrentPosition?.(p => { if (!isNaN(p)) seek.value = Math.floor(p); });
+        status.textContent = 'ready';
+      } catch(e){}
+    }
+  }, 700);
+
+  // clear ticker when card removed
+  const observer = new MutationObserver(m => {
+    if (!document.body.contains(card)) {
+      clearInterval(ticker);
+      observer.disconnect();
+    }
+  });
+  observer.observe(document, { childList:true, subtree:true });
+}
+
+/* ========== SYNC ENGINE (global for both types) ========== */
+/* Approach:
+   - Periodically sample each player's position (using Promise-based getter)
+   - Find minTime (slowest). Any player ahead by > MAX_DRIFT will be seeked back to minTime + small offset.
+   - playAllSynced(): pause all -> seek all to ref -> play all after tiny timeout
+*/
+
+const SYNC_INTERVAL = 1400;
+const MAX_DRIFT = 0.35; // seconds
+const CORRECT_OFFSET = 0.10;
+
+function getPlayerPosition(entry){
+  // returns Promise resolving to number (seconds) or null
+  return new Promise((resolve) => {
+    try {
+      const inst = entry.inst;
+      if (!inst) return resolve(null);
+      if (entry.type === 'yt') {
+        // YT player has getCurrentTime()
+        const t = inst.getCurrentTime ? inst.getCurrentTime() : null;
+        resolve(isFinite(t) ? t : null);
+      } else if (entry.type === 'fb') {
+        // FB player getCurrentPosition(callback)
+        if (inst.getCurrentPosition) {
+          inst.getCurrentPosition(pos => resolve(isFinite(pos) ? pos : null));
+        } else resolve(null);
+      } else resolve(null);
+    } catch(e){ resolve(null); }
+  });
+}
+
+function seekPlayer(entry, sec){
+  try {
+    const inst = entry.inst;
+    if (!inst) return;
+    if (entry.type === 'yt') {
+      if (inst.seekTo) inst.seekTo(sec, true);
+    } else if (entry.type === 'fb') {
+      if (inst.seek) inst.seek(sec);
+    }
+  } catch(e){}
+}
+
+function playPlayer(entry){
+  try {
+    const i = entry.inst;
+    if (!i) return;
+    if (entry.type === 'yt') {
+      if (i.playVideo) i.playVideo();
+    } else if (entry.type === 'fb') {
+      if (i.play) i.play();
+    }
+  } catch(e){}
+}
+function pausePlayer(entry){
+  try {
+    const i = entry.inst;
+    if (!i) return;
+    if (entry.type === 'yt') {
+      if (i.pauseVideo) i.pauseVideo();
+    } else if (entry.type === 'fb') {
+      if (i.pause) i.pause();
+    }
+  } catch(e){}
+}
+
+// periodic sync loop
+setInterval(async () => {
+  if (allPlayers.length < 2) return;
+
+  // sample positions in parallel
+  const samples = await Promise.all(allPlayers.map(p => getPlayerPosition(p)));
+  // map to entries with valid positions
+  const withPos = allPlayers.map((p,i) => ({entry:p, pos:samples[i]})).filter(x => x.pos !== null);
+
+  if (withPos.length < 2) return;
+
+  const positions = withPos.map(x => x.pos);
+  const minTime = Math.min(...positions);
+
+  // correct drift
+  withPos.forEach(({entry, pos}) => {
+    const drift = pos - minTime;
+    if (drift > MAX_DRIFT) {
+      // seek back slightly to minTime + offset
+      seekPlayer(entry, minTime + CORRECT_OFFSET);
+      // visual indicator: remove synced class briefly
+      entry.card.classList.remove('synced');
+    } else {
+      entry.card.classList.add('synced');
+    }
+  });
+}, SYNC_INTERVAL);
+
+/* ----- Play all in sync ----- */
+async function playAllSynced(){
+  if (allPlayers.length === 0) return;
+
+  // Pause all
+  allPlayers.forEach(p => pausePlayer(p));
+
+  // wait a tiny bit to ensure paused
+  await new Promise(r => setTimeout(r, 200));
+
+  // compute common ref position: min of current positions (0 if any null)
+  const samples = await Promise.all(allPlayers.map(p => getPlayerPosition(p)));
+  const valid = samples.filter(s => s !== null);
+  const refPos = (valid.length > 0) ? Math.min(...valid) : 0;
+
+  // seek all to refPos
+  allPlayers.forEach(p => seekPlayer(p, refPos));
+
+  // tiny wait, then play all
+  setTimeout(() => {
+    allPlayers.forEach(p => playPlayer(p));
+  }, 200);
+}
+
+/* ----- Global & per-platform quick helpers ----- */
+document.getElementById('globalPlay').addEventListener('click', () => playAllSynced());
+document.getElementById('globalPause').addEventListener('click', () => allPlayers.forEach(p => pausePlayer(p)));
+
+document.getElementById('ytPlayAll').addEventListener('click', async () => {
+  const yt = allPlayers.filter(p => p.type === 'yt');
+  if (!yt.length) return;
+  // pause yt
+  yt.forEach(p => pausePlayer(p));
+  await new Promise(r => setTimeout(r, 160));
+  // get min pos among yt
+  const samples = await Promise.all(yt.map(p => getPlayerPosition(p)));
+  const v = samples.filter(s => s !== null);
+  const ref = v.length ? Math.min(...v) : 0;
+  yt.forEach(p => seekPlayer(p, ref));
+  setTimeout(()=> yt.forEach(p => playPlayer(p)), 160);
+});
+document.getElementById('ytPauseAll').addEventListener('click', () => allPlayers.filter(p=>p.type==='yt').forEach(p=>pausePlayer(p)));
+
+document.getElementById('fbPlayAll').addEventListener('click', async () => {
+  const fb = allPlayers.filter(p => p.type === 'fb');
+  if (!fb.length) return;
+  fb.forEach(p => pausePlayer(p));
+  await new Promise(r => setTimeout(r, 160));
+  const samples = await Promise.all(fb.map(p => getPlayerPosition(p)));
+  const v = samples.filter(s => s !== null);
+  const ref = v.length ? Math.min(...v) : 0;
+  fb.forEach(p => seekPlayer(p, ref));
+  setTimeout(()=> fb.forEach(p => playPlayer(p)), 160);
+});
+document.getElementById('fbPauseAll').addEventListener('click', () => allPlayers.filter(p=>p.type==='fb').forEach(p=>pausePlayer(p)));
+
+/* ---------- small helper ---------- */
+function escapeHtml(s){
+  if (!s) return '';
+  return String(s).replace(/[&<>]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c]));
+}
+
+/* Ensure that when FB xfbml.ready arrives for fb players that were created earlier,
+   we attach the instance to the correct registry entry by matching the card's .fb-video presence.
+*/
+window.fbLoaded.then(FB => {
+  FB.Event.subscribe('xfbml.ready', (msg) => {
+    if (msg.type !== 'video') return;
+    try {
+      const el = msg.target; // DOM
+      const parentCard = el.closest('.card');
+      if (!parentCard) return;
+      // find registry entry
+      const entry = allPlayers.find(a => a.card === parentCard && a.type === 'fb');
+      if (entry) {
+        entry.inst = msg.instance;
+        const st = parentCard.querySelector('.status');
+        if (st) st.textContent = 'ready';
+      } else {
+        // push if missing
+        allPlayers.push({ id: makeId('fb'), type:'fb', inst: msg.instance, card: parentCard });
+      }
+    } catch(e){}
+  });
+}).catch(()=>{});
+</script>
+
+</body>
+</html>
